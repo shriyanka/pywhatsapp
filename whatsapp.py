@@ -54,13 +54,13 @@ class SendLayer(YowInterfaceLayer):
     def on_success(self, success_protocol_entity):
         self.lock.acquire()
         for target in self.getProp(self.__class__.PROP_MESSAGES, []):
-            phone, message, is_media = target
+            phone, message, caption, is_media = target
             jid = "%s@s.whatsapp.net" % phone
             if is_media:
                 path = message
                 entity = self.get_upload_entity(path)
-                success_fn = lambda success, original: self.on_request_upload_result(jid, path, success, original)
-                error_fn = lambda error, original: self.on_request_upload_error(jid, path, error, original)
+                success_fn = lambda success, original: self.on_request_upload_result(jid, path, success, original, caption)
+                error_fn = lambda error, original: self.on_request_upload_error(jid, path, error, original, caption)
                 self._sendIq(entity, success_fn, error_fn)
             else:
                 message_entity = TextMessageProtocolEntity(message, to=jid)
@@ -85,9 +85,9 @@ class SendLayer(YowInterfaceLayer):
         if result:
             raise ValueError(result)
 
-    def on_request_upload_result(self, jid, file_path, result_entity, request_entity):
+    def on_request_upload_result(self, jid, file_path, result_entity, request_entity, caption):
         if result_entity.isDuplicate():
-            self.send_file(file_path, result_entity.getUrl(), jid, result_entity.getIp())
+            self.send_file(file_path, result_entity.getUrl(), jid, result_entity.getIp(), caption)
         else:
             uploader = MediaUploader(
                 jid, self.getOwnJid(),
@@ -107,18 +107,18 @@ class SendLayer(YowInterfaceLayer):
     def on_upload_error(self, file_path, jid, url):
         self.disconnect("ERROR UPLOAD")
 
-    def on_upload_success(self, file_path, jid, url):
-        self.send_file(file_path, url, jid)
+    def on_upload_success(self, file_path, jid, url, caption=None):
+        self.send_file(file_path, url, jid, caption)
 
     def on_upload_progress(self, file_path, jid, url, progress):
         logger.info("Progress: {}".format(progress))
 
-    def send_file(self, file_path, url, to, ip=None):
+    def send_file(self, file_path, url, to, ip=None, caption=None):
         filename, extension = os.path.splitext(file_path)
         entity = None
 
         if extension in EXT_IMAGE:
-            entity = ImageDownloadableMediaMessageProtocolEntity.fromFilePath(file_path, url, ip, to)
+            entity = ImageDownloadableMediaMessageProtocolEntity.fromFilePath(file_path, url, ip, to, caption=caption)
         elif extension in EXT_VIDEO:
             entity = DownloadableMediaMessageProtocolEntity.fromFilePath(file_path, url, "video", ip, to)
         elif extension in EXT_AUDIO:
@@ -133,7 +133,7 @@ class Client(object):
         self.login = login
         self.password = password
 
-    def _send_message(self, to, message, is_media=False):
+    def _send_message(self, to, message, caption=None, is_media=False):
         layers = (SendLayer,) + (YOWSUP_PROTOCOL_LAYERS_FULL,) + YOWSUP_CORE_LAYERS
         self.stack = YowStack(layers)
         self.stack.setProp(YowAuthenticationProtocolLayer.PROP_PASSIVE, True)
@@ -142,7 +142,7 @@ class Client(object):
         self.stack.setProp(YowCoderLayer.PROP_DOMAIN, YowConstants.DOMAIN)
         self.stack.setProp(YowCoderLayer.PROP_RESOURCE, env.YowsupEnv.getCurrent().getResource())
 
-        self.stack.setProp(SendLayer.PROP_MESSAGES, [([to, message, is_media])])
+        self.stack.setProp(SendLayer.PROP_MESSAGES, [([to, message, caption, is_media])])
         self.stack.broadcastEvent(YowLayerEvent(YowNetworkLayer.EVENT_STATE_CONNECT))
         try:
             self.stack.loop()
@@ -152,5 +152,5 @@ class Client(object):
     def send_message(self, to, message):
         self._send_message(to, message)
 
-    def send_media(self, to, path):
-        self._send_message(to, path, is_media=True)
+    def send_media(self, to, path, caption=None):
+        self._send_message(to, path, caption, is_media=True)
